@@ -5,6 +5,12 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import mqtt, { MqttClient } from 'mqtt';
 
+// Thresholds for fatigue detection
+const EAR_CLOSED_THRESHOLD = 0.2;
+const PERCLOS_WARNING_THRESHOLD = 0.2;
+const PERCLOS_DANGER_THRESHOLD = 0.5;
+const PERCLOS_CRITICAL_THRESHOLD = 0.8;
+
 interface MqttConfig {
   host: string;
   port: string;
@@ -13,37 +19,171 @@ interface MqttConfig {
   topic: string;
 }
 
+interface AdvancedMetrics {
+  timestamp?: number;
+  ear: number;
+  ear_left?: number;
+  ear_right?: number;
+  eye_state?: string;
+  blink_detected?: boolean;
+  blink_duration_ms?: number;
+  blink_type?: string | null;
+  blink_frequency_hz?: number;
+  blinks_per_minute: number;
+  total_blinks: number;
+  normal_blinks?: number;
+  prolonged_blinks?: number;
+  critical_blinks?: number;
+  perclos: number;
+  perclos_level: string;
+  mar: number;
+  mouth_state?: string;
+  yawn_detected?: boolean;
+  yawn_in_progress?: boolean;
+  yawn_duration?: number;
+  yawns_last_minute?: number;
+  yawns_last_5_minutes?: number;
+  total_yawns: number;
+  pitch: number;
+  yaw: number;
+  roll: number;
+  head_state?: string;
+  nod_detected?: boolean;
+  head_drop_detected?: boolean;
+  excessive_tilt?: boolean;
+  nods_last_minute?: number;
+  total_nods: number;
+  head_stability?: number;
+  drowsiness_score?: number;
+  drowsiness_level?: string;
+  alert_triggered?: boolean;
+  alert_reasons?: string[];
+}
+
 interface FatigueData {
   timestamp: string;
   drowsiness_score: number;
   drowsiness_level: string;
   alert_triggered: boolean;
-  advanced_metrics: {
-    ear: number;
-    mar: number;
-    perclos: number;
-    perclos_level: string;
-    pitch: number;
-    yaw: number;
-    roll: number;
-    blinks_per_minute: number;
-    total_blinks: number;
-    total_yawns: number;
-    total_nods: number;
-  };
+  advanced_metrics: AdvancedMetrics;
   micro_sleep: {
+    report?: boolean;
     count: number;
+    durations?: number[];
+    eyes_closed?: boolean;
+    eyes_closed_duration?: number;
+    eyes_closed_alarm?: boolean;
   };
   flicker: {
+    report?: boolean;
     count: string | number;
   };
   yawn: {
+    report?: boolean;
     count: string | number;
+    durations?: number[];
   };
   pitch: {
+    report?: boolean;
     count: string | number;
+    durations?: number[];
+  };
+  eye_rub_first_hand?: {
+    report?: boolean;
+    count: number;
+    durations?: number[];
+  };
+  eye_rub_second_hand?: {
+    report?: boolean;
+    count: number;
+    durations?: number[];
   };
 }
+
+// Compute effective fatigue level considering PERCLOS priority
+const computeEffectiveFatigueLevel = (
+  drowsinessLevel: string,
+  drowsinessScore: number,
+  perclos: number,
+  perclosLevel: string,
+  ear: number,
+  eyesClosed: boolean
+): { level: string; score: number; isOverridden: boolean; reasons: string[] } => {
+  const reasons: string[] = [];
+  let effectiveLevel = drowsinessLevel;
+  let effectiveScore = drowsinessScore;
+  let isOverridden = false;
+
+  // Rule: PERCLOS critical overrides everything
+  if (perclos >= PERCLOS_CRITICAL_THRESHOLD || perclosLevel === 'critical') {
+    if (drowsinessLevel === 'LOW' || drowsinessLevel === 'NORMAL') {
+      effectiveLevel = 'CRITICAL';
+      effectiveScore = Math.max(effectiveScore, 80);
+      isOverridden = true;
+      reasons.push(`PERCLOS crítico: ${(perclos * 100).toFixed(0)}% tiempo con ojos cerrados`);
+    }
+  }
+
+  // Rule: EAR = 0 with sustained closed eyes indicates critical state
+  if (ear <= EAR_CLOSED_THRESHOLD && eyesClosed) {
+    if (effectiveLevel === 'LOW' || effectiveLevel === 'NORMAL') {
+      effectiveLevel = 'HIGH';
+      effectiveScore = Math.max(effectiveScore, 70);
+      isOverridden = true;
+      reasons.push('Ojos cerrados sostenidos detectados');
+    }
+  }
+
+  // Rule: Cannot show NORMAL if PERCLOS > 50%
+  if (perclos > PERCLOS_DANGER_THRESHOLD && effectiveLevel === 'NORMAL') {
+    effectiveLevel = 'MEDIUM';
+    effectiveScore = Math.max(effectiveScore, 50);
+    isOverridden = true;
+    reasons.push(`PERCLOS elevado: ${(perclos * 100).toFixed(0)}%`);
+  }
+
+  return { level: effectiveLevel, score: effectiveScore, isOverridden, reasons };
+};
+
+// Determine eye state from data
+const computeEyeState = (
+  rawEyeState: string | undefined,
+  ear: number,
+  perclos: number
+): string => {
+  // If PERCLOS is critical, eyes are effectively closed
+  if (perclos >= PERCLOS_CRITICAL_THRESHOLD) {
+    return 'closed';
+  }
+  // If EAR is below threshold, eyes are closed
+  if (ear <= EAR_CLOSED_THRESHOLD) {
+    return 'closed';
+  }
+  // If raw state is valid, use it
+  if (rawEyeState && rawEyeState !== 'unknown') {
+    return rawEyeState;
+  }
+  // Default to open if EAR is reasonable
+  if (ear > EAR_CLOSED_THRESHOLD) {
+    return 'open';
+  }
+  return 'unknown';
+};
+
+// Get PERCLOS color based on value
+const getPerclosColor = (perclos: number): string => {
+  if (perclos <= PERCLOS_WARNING_THRESHOLD) return 'text-metric-success';
+  if (perclos <= PERCLOS_DANGER_THRESHOLD) return 'text-metric-warning';
+  return 'text-metric-danger';
+};
+
+// Get EAR display with context
+const getEarDisplay = (ear: number): { value: string; context: string | null } => {
+  if (ear <= EAR_CLOSED_THRESHOLD) {
+    return { value: ear.toFixed(3), context: '(ojos cerrados)' };
+  }
+  return { value: ear.toFixed(3), context: null };
+};
 
 interface EventLogEntry {
   timestamp: string;
@@ -70,14 +210,16 @@ const FatigueMonitor = () => {
     topic: 'fatiga/#'
   });
 
-  const [metrics, setMetrics] = useState({
+const [metrics, setMetrics] = useState({
     ear: 0,
     mar: 0,
-    perclos: 0,
+    perclos: 0, // Raw 0-1 value
+    perclosPercent: 0, // Display percentage
     blinksPerMin: 0,
     pitch: 0,
     yaw: 0,
-    roll: 0
+    roll: 0,
+    eyeState: 'unknown'
   });
 
   const [counters, setCounters] = useState({
@@ -89,7 +231,16 @@ const FatigueMonitor = () => {
 
   const [fatigueLevel, setFatigueLevel] = useState({
     score: 0,
-    level: 'NORMAL'
+    level: 'NORMAL',
+    isOverridden: false,
+    alertReasons: [] as string[]
+  });
+
+  const [alertState, setAlertState] = useState({
+    isTriggered: false,
+    reasons: [] as string[],
+    eyesClosed: false,
+    eyesClosedDuration: 0
   });
 
   const [eventLog, setEventLog] = useState<EventLogEntry[]>([]);
@@ -100,58 +251,147 @@ const FatigueMonitor = () => {
     const now = new Date();
     const timeStr = now.toLocaleTimeString('es-ES');
     
-    // Add to event log
-    setEventLog(prev => [{
-      timestamp: timeStr,
-      topic,
-      payload
-    }, ...prev].slice(0, 50));
-
     setLastUpdate(timeStr);
 
     // Try to parse as fatigue data
     try {
       const data: FatigueData = JSON.parse(payload);
       
-      // Update metrics from advanced_metrics
       if (data.advanced_metrics) {
         const am = data.advanced_metrics;
+        const rawPerclos = am.perclos || 0;
+        const rawEar = am.ear || 0;
+        const rawPerclosLevel = am.perclos_level || 'normal';
+        
+        // Compute effective eye state
+        const effectiveEyeState = computeEyeState(am.eye_state, rawEar, rawPerclos);
+        
+        // Check for sustained eye closure
+        const eyesClosed = data.micro_sleep?.eyes_closed || false;
+        const eyesClosedDuration = data.micro_sleep?.eyes_closed_duration || 0;
+        
+        // Compute effective fatigue level with PERCLOS priority
+        const effectiveFatigue = computeEffectiveFatigueLevel(
+          data.drowsiness_level || 'NORMAL',
+          data.drowsiness_score || 0,
+          rawPerclos,
+          rawPerclosLevel,
+          rawEar,
+          eyesClosed
+        );
+
+        // Update metrics with raw values
         setMetrics({
-          ear: am.ear || 0,
+          ear: rawEar,
           mar: am.mar || 0,
-          perclos: (am.perclos || 0) * 100,
+          perclos: rawPerclos,
+          perclosPercent: rawPerclos * 100,
           blinksPerMin: am.blinks_per_minute || 0,
           pitch: am.pitch || 0,
           yaw: am.yaw || 0,
-          roll: am.roll || 0
+          roll: am.roll || 0,
+          eyeState: effectiveEyeState
         });
 
+        // Update counters
         setCounters({
           blinks: am.total_blinks || 0,
           yawns: am.total_yawns || 0,
           microSleeps: data.micro_sleep?.count || 0,
           nods: am.total_nods || 0
         });
+
+        // Update fatigue level with override logic
+        setFatigueLevel({
+          score: effectiveFatigue.score,
+          level: effectiveFatigue.level,
+          isOverridden: effectiveFatigue.isOverridden,
+          alertReasons: effectiveFatigue.reasons
+        });
+
+        // Update alert state
+        setAlertState({
+          isTriggered: data.alert_triggered || effectiveFatigue.isOverridden,
+          reasons: am.alert_reasons || effectiveFatigue.reasons,
+          eyesClosed,
+          eyesClosedDuration
+        });
+
+        // Determine timeline level based on effective state
+        const timelineLevel: 'normal' | 'warning' | 'danger' = 
+          effectiveFatigue.level === 'HIGH' || effectiveFatigue.level === 'CRITICAL' 
+            ? 'danger' 
+            : effectiveFatigue.level === 'MEDIUM' || rawPerclos > PERCLOS_WARNING_THRESHOLD
+              ? 'warning' 
+              : 'normal';
+        
+        setTimeline(prev => [...prev, { time: timeStr, level: timelineLevel }].slice(-60));
+
+        // Add meaningful events to log
+        const logEntries: EventLogEntry[] = [];
+        
+        // Log PERCLOS critical state
+        if (rawPerclos >= PERCLOS_CRITICAL_THRESHOLD) {
+          logEntries.push({
+            timestamp: timeStr,
+            topic: 'ALERTA',
+            payload: `PERCLOS crítico: ${(rawPerclos * 100).toFixed(0)}% - Ojos cerrados detectados`
+          });
+        }
+        
+        // Log microsleep
+        if (data.micro_sleep?.report) {
+          logEntries.push({
+            timestamp: timeStr,
+            topic: 'MICROSUEÑO',
+            payload: `Microsueño detectado - Duración: ${eyesClosedDuration.toFixed(1)}s`
+          });
+        }
+        
+        // Log yawn
+        if (am.yawn_detected) {
+          logEntries.push({
+            timestamp: timeStr,
+            topic: 'BOSTEZO',
+            payload: 'Bostezo detectado'
+          });
+        }
+        
+        // Log head nod
+        if (am.nod_detected) {
+          logEntries.push({
+            timestamp: timeStr,
+            topic: 'CABECEO',
+            payload: 'Cabeceo detectado'
+          });
+        }
+        
+        // Log alert reasons
+        if (effectiveFatigue.isOverridden && effectiveFatigue.reasons.length > 0) {
+          logEntries.push({
+            timestamp: timeStr,
+            topic: 'OVERRIDE',
+            payload: effectiveFatigue.reasons.join(' | ')
+          });
+        }
+
+        // Always log raw data for debugging (compact format)
+        logEntries.push({
+          timestamp: timeStr,
+          topic,
+          payload: `EAR:${rawEar.toFixed(3)} MAR:${(am.mar||0).toFixed(3)} PERCLOS:${(rawPerclos*100).toFixed(0)}% Level:${effectiveFatigue.level}`
+        });
+        
+        setEventLog(prev => [...logEntries, ...prev].slice(0, 100));
       }
-
-      // Update fatigue level
-      setFatigueLevel({
-        score: data.drowsiness_score || 0,
-        level: data.drowsiness_level || 'NORMAL'
-      });
-
-      // Add to timeline
-      const level: 'normal' | 'warning' | 'danger' = 
-        data.drowsiness_level === 'HIGH' || data.drowsiness_level === 'CRITICAL' 
-          ? 'danger' 
-          : data.drowsiness_level === 'MEDIUM' 
-            ? 'warning' 
-            : 'normal';
-      
-      setTimeline(prev => [...prev, { time: timeStr, level }].slice(-60));
       
     } catch (e) {
-      console.log('Non-JSON message received:', payload);
+      // Log non-JSON messages
+      setEventLog(prev => [{
+        timestamp: timeStr,
+        topic,
+        payload
+      }, ...prev].slice(0, 100));
     }
   }, []);
 
@@ -230,6 +470,21 @@ const FatigueMonitor = () => {
         return 'bg-metric-success';
     }
   };
+
+  const getFatigueLevelTextColor = () => {
+    switch (fatigueLevel.level) {
+      case 'HIGH':
+      case 'CRITICAL':
+        return 'text-metric-danger';
+      case 'MEDIUM':
+        return 'text-metric-warning';
+      default:
+        return 'text-metric-success';
+    }
+  };
+
+  const earDisplay = getEarDisplay(metrics.ear);
+  const perclosColor = getPerclosColor(metrics.perclos);
 
   return (
     <div className="min-h-screen bg-background p-6">
@@ -354,7 +609,14 @@ const FatigueMonitor = () => {
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <span className="text-muted-foreground text-xs">EAR</span>
-                <p className="text-2xl font-mono text-metric-primary">{metrics.ear.toFixed(3)}</p>
+                <div className="flex items-baseline gap-1">
+                  <p className={`text-2xl font-mono ${metrics.ear <= EAR_CLOSED_THRESHOLD ? 'text-metric-danger' : 'text-metric-primary'}`}>
+                    {earDisplay.value}
+                  </p>
+                  {earDisplay.context && (
+                    <span className="text-xs text-metric-danger">{earDisplay.context}</span>
+                  )}
+                </div>
               </div>
               <div>
                 <span className="text-muted-foreground text-xs">MAR</span>
@@ -362,7 +624,12 @@ const FatigueMonitor = () => {
               </div>
               <div>
                 <span className="text-muted-foreground text-xs">PERCLOS</span>
-                <p className="text-2xl font-mono text-metric-success">{metrics.perclos.toFixed(1)}%</p>
+                <p className={`text-2xl font-mono ${perclosColor}`}>
+                  {metrics.perclosPercent.toFixed(1)}%
+                </p>
+                {metrics.perclos >= PERCLOS_CRITICAL_THRESHOLD && (
+                  <span className="text-xs text-metric-danger font-semibold">CRÍTICO</span>
+                )}
               </div>
               <div>
                 <span className="text-muted-foreground text-xs">BLINKS/MIN</span>
@@ -370,14 +637,35 @@ const FatigueMonitor = () => {
               </div>
               <div>
                 <span className="text-muted-foreground text-xs">PITCH</span>
-                <p className="text-2xl font-mono text-metric-secondary">{metrics.pitch.toFixed(1)}</p>
+                <p className="text-2xl font-mono text-metric-secondary">{metrics.pitch.toFixed(1)}°</p>
               </div>
               <div>
-                <span className="text-muted-foreground text-xs">YAW/ROLL</span>
+                <span className="text-muted-foreground text-xs">YAW / ROLL</span>
                 <p className="text-2xl font-mono text-metric-success">
-                  {metrics.yaw.toFixed(1)} / {metrics.roll.toFixed(1)}
+                  {metrics.yaw.toFixed(1)}° / {metrics.roll.toFixed(1)}°
                 </p>
               </div>
+            </div>
+            {/* Eye State Indicator */}
+            <div className="mt-4 pt-4 border-t border-border">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground text-sm">Estado de Ojos</span>
+                <span className={`font-semibold ${
+                  metrics.eyeState === 'closed' ? 'text-metric-danger' : 
+                  metrics.eyeState === 'open' ? 'text-metric-success' : 'text-muted-foreground'
+                }`}>
+                  {metrics.eyeState === 'closed' ? 'CERRADOS' : 
+                   metrics.eyeState === 'open' ? 'ABIERTOS' : 'DESCONOCIDO'}
+                </span>
+              </div>
+              {alertState.eyesClosed && alertState.eyesClosedDuration > 0 && (
+                <div className="flex items-center justify-between mt-2">
+                  <span className="text-muted-foreground text-sm">Duración Ojos Cerrados</span>
+                  <span className="text-metric-danger font-mono">
+                    {alertState.eyesClosedDuration.toFixed(1)}s
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -385,10 +673,23 @@ const FatigueMonitor = () => {
         {/* Right Column - Fatigue Level & Counters */}
         <div className="space-y-6">
           {/* Fatigue Level */}
-          <div className="bg-card rounded-lg p-6 border border-border">
+          <div className={`bg-card rounded-lg p-6 border ${
+            fatigueLevel.level === 'CRITICAL' ? 'border-metric-danger border-2' :
+            fatigueLevel.level === 'HIGH' ? 'border-metric-danger' :
+            fatigueLevel.level === 'MEDIUM' ? 'border-metric-warning' : 'border-border'
+          }`}>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-foreground">Nivel de Fatiga</h2>
-              <span className="text-3xl font-mono text-foreground">{fatigueLevel.score.toFixed(1)}%</span>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-semibold text-foreground">Nivel de Fatiga</h2>
+                {fatigueLevel.isOverridden && (
+                  <span className="px-2 py-0.5 bg-metric-danger/20 text-metric-danger text-xs rounded-full font-semibold">
+                    OVERRIDE
+                  </span>
+                )}
+              </div>
+              <span className={`text-3xl font-mono ${getFatigueLevelTextColor()}`}>
+                {fatigueLevel.score.toFixed(1)}%
+              </span>
             </div>
             <div className="w-full bg-card-elevated rounded-full h-8 overflow-hidden">
               <div 
@@ -396,7 +697,24 @@ const FatigueMonitor = () => {
                 style={{ width: `${Math.min(fatigueLevel.score, 100)}%` }}
               />
             </div>
-            <p className="text-center mt-2 text-muted-foreground font-semibold">{fatigueLevel.level}</p>
+            <p className={`text-center mt-2 font-bold text-lg ${getFatigueLevelTextColor()}`}>
+              {fatigueLevel.level}
+            </p>
+            
+            {/* Alert Reasons */}
+            {fatigueLevel.alertReasons.length > 0 && (
+              <div className="mt-4 p-3 bg-metric-danger/10 rounded-lg border border-metric-danger/30">
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertTriangle className="h-4 w-4 text-metric-danger" />
+                  <span className="text-sm font-semibold text-metric-danger">Alertas Activas</span>
+                </div>
+                <ul className="space-y-1">
+                  {fatigueLevel.alertReasons.map((reason, i) => (
+                    <li key={i} className="text-xs text-metric-danger/90">{reason}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
 
           {/* Counters Grid */}
