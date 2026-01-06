@@ -16,6 +16,8 @@ export default {
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
+        "input-bg": "hsl(var(--input-bg))",
+        "input-border": "hsl(var(--input-border))",
         ring: "hsl(var(--ring))",
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
@@ -46,6 +48,7 @@ export default {
         card: {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
+          elevated: "hsl(var(--card-elevated))",
         },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
@@ -56,6 +59,15 @@ export default {
           "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
+        },
+        metric: {
+          primary: "hsl(var(--metric-primary))",
+          secondary: "hsl(var(--metric-secondary))",
+          success: "hsl(var(--metric-success))",
+          warning: "hsl(var(--metric-warning))",
+          danger: "hsl(var(--metric-danger))",
+          info: "hsl(var(--metric-info))",
+          purple: "hsl(var(--metric-purple))",
         },
       },
       borderRadius: {
