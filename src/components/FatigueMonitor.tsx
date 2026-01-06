@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Wifi, WifiOff, Settings, RotateCcw, Eye, AlertTriangle, Clock, Activity } from 'lucide-react';
+import { Wifi, WifiOff, Settings, RotateCcw, Eye, AlertTriangle, Clock, Activity, Volume2, VolumeX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -10,6 +10,11 @@ const EAR_CLOSED_THRESHOLD = 0.2;
 const PERCLOS_WARNING_THRESHOLD = 0.2;
 const PERCLOS_DANGER_THRESHOLD = 0.5;
 const PERCLOS_CRITICAL_THRESHOLD = 0.8;
+
+// Time thresholds in seconds
+const MICROSLEEP_THRESHOLD = 1.0; // 1 second for microsleep
+const YAWN_THRESHOLD = 1.0; // 1 second for yawn detection
+const ALARM_THRESHOLD = 3.0; // 3 seconds for alarm
 
 interface MqttConfig {
   host: string;
@@ -145,27 +150,27 @@ const computeEffectiveFatigueLevel = (
   return { level: effectiveLevel, score: effectiveScore, isOverridden, reasons };
 };
 
-// Determine eye state from data
+// Determine eye state from data - prioritize EAR for real-time detection
 const computeEyeState = (
   rawEyeState: string | undefined,
   ear: number,
   perclos: number
-): string => {
+): 'open' | 'closed' | 'unknown' => {
+  // EAR is the most reliable real-time indicator
+  if (ear > EAR_CLOSED_THRESHOLD) {
+    return 'open';
+  }
+  // If EAR is below threshold, eyes are closed
+  if (ear <= EAR_CLOSED_THRESHOLD && ear >= 0) {
+    return 'closed';
+  }
   // If PERCLOS is critical, eyes are effectively closed
   if (perclos >= PERCLOS_CRITICAL_THRESHOLD) {
     return 'closed';
   }
-  // If EAR is below threshold, eyes are closed
-  if (ear <= EAR_CLOSED_THRESHOLD) {
-    return 'closed';
-  }
   // If raw state is valid, use it
-  if (rawEyeState && rawEyeState !== 'unknown') {
+  if (rawEyeState === 'open' || rawEyeState === 'closed') {
     return rawEyeState;
-  }
-  // Default to open if EAR is reasonable
-  if (ear > EAR_CLOSED_THRESHOLD) {
-    return 'open';
   }
   return 'unknown';
 };
@@ -200,7 +205,17 @@ const FatigueMonitor = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<string>('-');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [alarmEnabled, setAlarmEnabled] = useState(true);
+  const [isAlarmPlaying, setIsAlarmPlaying] = useState(false);
   const clientRef = useRef<MqttClient | null>(null);
+  const alarmRef = useRef<HTMLAudioElement | null>(null);
+  const lastAlarmTimeRef = useRef<number>(0);
+  
+  // Track local eye closure timing
+  const eyeClosureStartRef = useRef<number | null>(null);
+  const localMicroSleepCountRef = useRef<number>(0);
+  const localYawnCountRef = useRef<number>(0);
+  const yawnStartRef = useRef<number | null>(null);
   
   const [config, setConfig] = useState<MqttConfig>({
     host: 'hbc0fc94.ala.us-east-1.emqxsl.com',
@@ -210,16 +225,16 @@ const FatigueMonitor = () => {
     topic: 'fatiga/#'
   });
 
-const [metrics, setMetrics] = useState({
+  const [metrics, setMetrics] = useState({
     ear: 0,
     mar: 0,
-    perclos: 0, // Raw 0-1 value
-    perclosPercent: 0, // Display percentage
+    perclos: 0,
+    perclosPercent: 0,
     blinksPerMin: 0,
     pitch: 0,
     yaw: 0,
     roll: 0,
-    eyeState: 'unknown'
+    eyeState: 'unknown' as 'open' | 'closed' | 'unknown'
   });
 
   const [counters, setCounters] = useState({
@@ -246,10 +261,43 @@ const [metrics, setMetrics] = useState({
   const [eventLog, setEventLog] = useState<EventLogEntry[]>([]);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
 
+  // Initialize audio element
+  useEffect(() => {
+    alarmRef.current = new Audio('/sounds/alarma.mp3');
+    alarmRef.current.loop = true;
+    return () => {
+      if (alarmRef.current) {
+        alarmRef.current.pause();
+        alarmRef.current = null;
+      }
+    };
+  }, []);
+
+  // Play alarm function
+  const playAlarm = useCallback(() => {
+    if (alarmEnabled && alarmRef.current && !isAlarmPlaying) {
+      const now = Date.now();
+      if (now - lastAlarmTimeRef.current > 1000) {
+        alarmRef.current.play().catch(console.error);
+        setIsAlarmPlaying(true);
+        lastAlarmTimeRef.current = now;
+      }
+    }
+  }, [alarmEnabled, isAlarmPlaying]);
+
+  // Stop alarm function
+  const stopAlarm = useCallback(() => {
+    if (alarmRef.current && isAlarmPlaying) {
+      alarmRef.current.pause();
+      alarmRef.current.currentTime = 0;
+      setIsAlarmPlaying(false);
+    }
+  }, [isAlarmPlaying]);
+
   const handleMessage = useCallback((topic: string, message: Buffer) => {
     const payload = message.toString();
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('es-ES');
+    const now = Date.now();
+    const timeStr = new Date().toLocaleTimeString('es-ES');
     
     setLastUpdate(timeStr);
 
@@ -263,12 +311,78 @@ const [metrics, setMetrics] = useState({
         const rawEar = am.ear || 0;
         const rawPerclosLevel = am.perclos_level || 'normal';
         
-        // Compute effective eye state
+        // Compute effective eye state using EAR as primary indicator
         const effectiveEyeState = computeEyeState(am.eye_state, rawEar, rawPerclos);
         
-        // Check for sustained eye closure
-        const eyesClosed = data.micro_sleep?.eyes_closed || false;
-        const eyesClosedDuration = data.micro_sleep?.eyes_closed_duration || 0;
+        // Local eye closure tracking for microsleep detection
+        let localEyesClosedDuration = 0;
+        if (effectiveEyeState === 'closed') {
+          if (eyeClosureStartRef.current === null) {
+            eyeClosureStartRef.current = now;
+          }
+          localEyesClosedDuration = (now - eyeClosureStartRef.current) / 1000;
+          
+          // Check for microsleep (>1 second)
+          if (localEyesClosedDuration >= MICROSLEEP_THRESHOLD && localEyesClosedDuration < MICROSLEEP_THRESHOLD + 0.5) {
+            // Only count once when crossing threshold
+            localMicroSleepCountRef.current += 1;
+            setEventLog(prev => [{
+              timestamp: timeStr,
+              topic: 'MICROSUEÑO',
+              payload: `Microsueño detectado - Duración: ${localEyesClosedDuration.toFixed(1)}s`
+            }, ...prev].slice(0, 100));
+          }
+          
+          // Check for alarm trigger (>3 seconds)
+          if (localEyesClosedDuration >= ALARM_THRESHOLD) {
+            playAlarm();
+            setEventLog(prev => [{
+              timestamp: timeStr,
+              topic: 'ALARMA',
+              payload: `¡ALARMA! Ojos cerrados por ${localEyesClosedDuration.toFixed(1)}s`
+            }, ...prev].slice(0, 100));
+          }
+        } else if (effectiveEyeState === 'open') {
+          // Eyes opened - reset tracking and stop alarm
+          if (eyeClosureStartRef.current !== null) {
+            const closedDuration = (now - eyeClosureStartRef.current) / 1000;
+            if (closedDuration >= ALARM_THRESHOLD) {
+              setEventLog(prev => [{
+                timestamp: timeStr,
+                topic: 'INFO',
+                payload: `Ojos abiertos después de ${closedDuration.toFixed(1)}s cerrados`
+              }, ...prev].slice(0, 100));
+            }
+            eyeClosureStartRef.current = null;
+          }
+          stopAlarm();
+        }
+        
+        // Yawn tracking (>1 second)
+        const yawnInProgress = am.yawn_in_progress || false;
+        const yawnDuration = am.yawn_duration || 0;
+        
+        if (yawnInProgress) {
+          if (yawnStartRef.current === null) {
+            yawnStartRef.current = now;
+          }
+          const localYawnDuration = (now - yawnStartRef.current) / 1000;
+          
+          if (localYawnDuration >= YAWN_THRESHOLD && localYawnDuration < YAWN_THRESHOLD + 0.5) {
+            localYawnCountRef.current += 1;
+            setEventLog(prev => [{
+              timestamp: timeStr,
+              topic: 'BOSTEZO',
+              payload: `Bostezo detectado - Duración: ${Math.max(localYawnDuration, yawnDuration).toFixed(1)}s`
+            }, ...prev].slice(0, 100));
+          }
+        } else {
+          yawnStartRef.current = null;
+        }
+        
+        // Use server data for eyes closed duration if available, else use local
+        const eyesClosed = effectiveEyeState === 'closed';
+        const eyesClosedDuration = data.micro_sleep?.eyes_closed_duration || localEyesClosedDuration;
         
         // Compute effective fatigue level with PERCLOS priority
         const effectiveFatigue = computeEffectiveFatigueLevel(
@@ -293,13 +407,13 @@ const [metrics, setMetrics] = useState({
           eyeState: effectiveEyeState
         });
 
-        // Update counters
-        setCounters({
-          blinks: am.total_blinks || 0,
-          yawns: am.total_yawns || 0,
-          microSleeps: data.micro_sleep?.count || 0,
-          nods: am.total_nods || 0
-        });
+        // Update counters - use local counts for microsleeps and yawns
+        setCounters(prev => ({
+          blinks: am.total_blinks || prev.blinks,
+          yawns: Math.max(am.total_yawns || 0, localYawnCountRef.current),
+          microSleeps: Math.max(data.micro_sleep?.count || 0, localMicroSleepCountRef.current),
+          nods: am.total_nods || prev.nods
+        }));
 
         // Update fatigue level with override logic
         setFatigueLevel({
@@ -327,62 +441,30 @@ const [metrics, setMetrics] = useState({
         
         setTimeline(prev => [...prev, { time: timeStr, level: timelineLevel }].slice(-60));
 
-        // Add meaningful events to log
-        const logEntries: EventLogEntry[] = [];
-        
-        // Log PERCLOS critical state
+        // Add PERCLOS critical log
         if (rawPerclos >= PERCLOS_CRITICAL_THRESHOLD) {
-          logEntries.push({
-            timestamp: timeStr,
-            topic: 'ALERTA',
-            payload: `PERCLOS crítico: ${(rawPerclos * 100).toFixed(0)}% - Ojos cerrados detectados`
-          });
-        }
-        
-        // Log microsleep
-        if (data.micro_sleep?.report) {
-          logEntries.push({
-            timestamp: timeStr,
-            topic: 'MICROSUEÑO',
-            payload: `Microsueño detectado - Duración: ${eyesClosedDuration.toFixed(1)}s`
-          });
-        }
-        
-        // Log yawn
-        if (am.yawn_detected) {
-          logEntries.push({
-            timestamp: timeStr,
-            topic: 'BOSTEZO',
-            payload: 'Bostezo detectado'
+          setEventLog(prev => {
+            const lastEntry = prev[0];
+            // Avoid duplicate logs
+            if (lastEntry?.topic === 'ALERTA' && lastEntry.payload.includes('PERCLOS')) {
+              return prev;
+            }
+            return [{
+              timestamp: timeStr,
+              topic: 'ALERTA',
+              payload: `PERCLOS crítico: ${(rawPerclos * 100).toFixed(0)}% - Ojos cerrados detectados`
+            }, ...prev].slice(0, 100);
           });
         }
         
         // Log head nod
         if (am.nod_detected) {
-          logEntries.push({
+          setEventLog(prev => [{
             timestamp: timeStr,
             topic: 'CABECEO',
             payload: 'Cabeceo detectado'
-          });
+          }, ...prev].slice(0, 100));
         }
-        
-        // Log alert reasons
-        if (effectiveFatigue.isOverridden && effectiveFatigue.reasons.length > 0) {
-          logEntries.push({
-            timestamp: timeStr,
-            topic: 'OVERRIDE',
-            payload: effectiveFatigue.reasons.join(' | ')
-          });
-        }
-
-        // Always log raw data for debugging (compact format)
-        logEntries.push({
-          timestamp: timeStr,
-          topic,
-          payload: `EAR:${rawEar.toFixed(3)} MAR:${(am.mar||0).toFixed(3)} PERCLOS:${(rawPerclos*100).toFixed(0)}% Level:${effectiveFatigue.level}`
-        });
-        
-        setEventLog(prev => [...logEntries, ...prev].slice(0, 100));
       }
       
     } catch (e) {
@@ -393,7 +475,7 @@ const [metrics, setMetrics] = useState({
         payload
       }, ...prev].slice(0, 100));
     }
-  }, []);
+  }, [playAlarm, stopAlarm]);
 
   const connect = useCallback(() => {
     if (clientRef.current) {
@@ -449,6 +531,11 @@ const [metrics, setMetrics] = useState({
     setCounters({ blinks: 0, yawns: 0, microSleeps: 0, nods: 0 });
     setTimeline([]);
     setEventLog([]);
+    localMicroSleepCountRef.current = 0;
+    localYawnCountRef.current = 0;
+    eyeClosureStartRef.current = null;
+    yawnStartRef.current = null;
+    stopAlarm();
   };
 
   useEffect(() => {
@@ -492,6 +579,33 @@ const [metrics, setMetrics] = useState({
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-foreground">Monitor de Fatiga del Conductor</h1>
         <div className="flex items-center gap-4">
+          {/* Alarm Toggle */}
+          <Button
+            onClick={() => {
+              if (isAlarmPlaying) {
+                stopAlarm();
+              }
+              setAlarmEnabled(!alarmEnabled);
+            }}
+            variant="ghost"
+            size="icon"
+            className={isAlarmPlaying ? 'animate-pulse text-metric-danger' : ''}
+            title={alarmEnabled ? 'Desactivar alarma' : 'Activar alarma'}
+          >
+            {alarmEnabled ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
+          </Button>
+          
+          {isAlarmPlaying && (
+            <Button
+              onClick={stopAlarm}
+              variant="destructive"
+              size="sm"
+              className="animate-pulse"
+            >
+              ¡Detener Alarma!
+            </Button>
+          )}
+          
           <Button
             onClick={isConnected ? disconnect : connect}
             variant={isConnected ? "destructive" : "default"}
