@@ -204,7 +204,7 @@ const FatigueMonitor = () => {
   
   const [config, setConfig] = useState<MqttConfig>({
     host: 'hbc0fc94.ala.us-east-1.emqxsl.com',
-    port: '8084',
+    port: '8883',
     username: 'Cristian',
     password: 'Noviembre0824@',
     topic: 'Test/Connection'
