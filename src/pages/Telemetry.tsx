@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import type { Tables } from '@/integrations/supabase/types';
 import { Truck, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
+type TelemetryRecord = Tables<'telemetry_raw'>;
+
 const Telemetry = () => {
-  const [records, setRecords] = useState<any[]>([]);
+  const [records, setRecords] = useState<TelemetryRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchTelemetry = async () => {

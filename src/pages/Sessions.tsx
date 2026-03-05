@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import type { Tables } from '@/integrations/supabase/types';
 import { FileText, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
+type SessionRecord = Tables<'sessions'>;
+
 const Sessions = () => {
-  const [sessions, setSessions] = useState<any[]>([]);
+  const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchSessions = async () => {

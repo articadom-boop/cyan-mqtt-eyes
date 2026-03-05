@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import type { Tables } from '@/integrations/supabase/types';
 import { Database, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
+type EventRecord = Tables<'events'>;
+
 const Events = () => {
-  const [events, setEvents] = useState<any[]>([]);
+  const [events, setEvents] = useState<EventRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchEvents = async () => {
