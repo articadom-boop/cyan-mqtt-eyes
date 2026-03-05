@@ -207,7 +207,7 @@ const FatigueMonitor = () => {
     port: '8084',
     username: 'Cristian',
     password: 'Noviembre0824@',
-    topic: 'fleet/truck_042/telemetry'
+    topic: 'Test/Connection'
   });
 
 const [metrics, setMetrics] = useState({
