@@ -14,7 +14,206 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      emergency_alerts: {
+        Row: {
+          acknowledged: boolean | null
+          alert_reasons: string[] | null
+          alert_type: string
+          created_at: string
+          drowsiness_level: string
+          drowsiness_score: number | null
+          ear: number | null
+          id: string
+          perclos: number | null
+          session_id: string | null
+        }
+        Insert: {
+          acknowledged?: boolean | null
+          alert_reasons?: string[] | null
+          alert_type?: string
+          created_at?: string
+          drowsiness_level?: string
+          drowsiness_score?: number | null
+          ear?: number | null
+          id?: string
+          perclos?: number | null
+          session_id?: string | null
+        }
+        Update: {
+          acknowledged?: boolean | null
+          alert_reasons?: string[] | null
+          alert_type?: string
+          created_at?: string
+          drowsiness_level?: string
+          drowsiness_score?: number | null
+          ear?: number | null
+          id?: string
+          perclos?: number | null
+          session_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "emergency_alerts_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      events: {
+        Row: {
+          created_at: string
+          details: Json | null
+          event_type: string
+          id: string
+          session_id: string | null
+          severity: string
+        }
+        Insert: {
+          created_at?: string
+          details?: Json | null
+          event_type: string
+          id?: string
+          session_id?: string | null
+          severity?: string
+        }
+        Update: {
+          created_at?: string
+          details?: Json | null
+          event_type?: string
+          id?: string
+          session_id?: string | null
+          severity?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "events_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      metrics_summary: {
+        Row: {
+          avg_ear: number | null
+          avg_mar: number | null
+          avg_perclos: number | null
+          created_at: string
+          id: string
+          max_drowsiness_score: number | null
+          session_id: string | null
+          total_blinks: number | null
+          total_microsleeps: number | null
+          total_nods: number | null
+          total_yawns: number | null
+          updated_at: string
+        }
+        Insert: {
+          avg_ear?: number | null
+          avg_mar?: number | null
+          avg_perclos?: number | null
+          created_at?: string
+          id?: string
+          max_drowsiness_score?: number | null
+          session_id?: string | null
+          total_blinks?: number | null
+          total_microsleeps?: number | null
+          total_nods?: number | null
+          total_yawns?: number | null
+          updated_at?: string
+        }
+        Update: {
+          avg_ear?: number | null
+          avg_mar?: number | null
+          avg_perclos?: number | null
+          created_at?: string
+          id?: string
+          max_drowsiness_score?: number | null
+          session_id?: string | null
+          total_blinks?: number | null
+          total_microsleeps?: number | null
+          total_nods?: number | null
+          total_yawns?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "metrics_summary_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sessions: {
+        Row: {
+          created_at: string
+          driver_id: string
+          ended_at: string | null
+          id: string
+          started_at: string
+          status: string
+          updated_at: string
+          vehicle_id: string
+        }
+        Insert: {
+          created_at?: string
+          driver_id?: string
+          ended_at?: string | null
+          id?: string
+          started_at?: string
+          status?: string
+          updated_at?: string
+          vehicle_id?: string
+        }
+        Update: {
+          created_at?: string
+          driver_id?: string
+          ended_at?: string | null
+          id?: string
+          started_at?: string
+          status?: string
+          updated_at?: string
+          vehicle_id?: string
+        }
+        Relationships: []
+      }
+      telemetry_raw: {
+        Row: {
+          id: string
+          raw_payload: Json
+          received_at: string
+          session_id: string | null
+          topic: string
+        }
+        Insert: {
+          id?: string
+          raw_payload?: Json
+          received_at?: string
+          session_id?: string | null
+          topic?: string
+        }
+        Update: {
+          id?: string
+          raw_payload?: Json
+          received_at?: string
+          session_id?: string | null
+          topic?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "telemetry_raw_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
