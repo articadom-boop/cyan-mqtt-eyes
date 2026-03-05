@@ -3,22 +3,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { LayoutDashboard, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-interface MetricsSummary {
-  id: string;
-  session_id: string;
-  avg_ear: number;
-  avg_mar: number;
-  avg_perclos: number;
-  total_blinks: number;
-  total_yawns: number;
-  total_microsleeps: number;
-  total_nods: number;
-  max_drowsiness_score: number;
-  created_at: string;
-}
-
 const Metrics = () => {
-  const [metrics, setMetrics] = useState<MetricsSummary[]>([]);
+  const [metrics, setMetrics] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchMetrics = async () => {
@@ -29,7 +15,7 @@ const Metrics = () => {
       .order('created_at', { ascending: false })
       .limit(50);
     
-    if (!error && data) setMetrics(data as MetricsSummary[]);
+    if (!error && data) setMetrics(data);
     setLoading(false);
   };
 
@@ -59,28 +45,26 @@ const Metrics = () => {
                 <th className="text-left p-4 font-medium text-muted-foreground">Blinks</th>
                 <th className="text-left p-4 font-medium text-muted-foreground">Bostezos</th>
                 <th className="text-left p-4 font-medium text-muted-foreground">Microsueños</th>
-                <th className="text-left p-4 font-medium text-muted-foreground">Cabeceos</th>
                 <th className="text-left p-4 font-medium text-muted-foreground">Max Score</th>
                 <th className="text-left p-4 font-medium text-muted-foreground">Fecha</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={10} className="p-8 text-center text-muted-foreground">Cargando...</td></tr>
+                <tr><td colSpan={9} className="p-8 text-center text-muted-foreground">Cargando...</td></tr>
               ) : metrics.length === 0 ? (
-                <tr><td colSpan={10} className="p-8 text-center text-muted-foreground">
-                  No hay métricas registradas. Pendiente: conectar base de datos.
+                <tr><td colSpan={9} className="p-8 text-center text-muted-foreground">
+                  No hay métricas registradas aún.
                 </td></tr>
               ) : metrics.map(m => (
                 <tr key={m.id} className="border-b border-border hover:bg-muted/30 transition-colors">
                   <td className="p-4 font-mono text-xs">{m.session_id?.slice(0, 8)}...</td>
                   <td className="p-4 font-mono">{m.avg_ear?.toFixed(3)}</td>
                   <td className="p-4 font-mono">{m.avg_mar?.toFixed(3)}</td>
-                  <td className="p-4 font-mono">{(m.avg_perclos * 100)?.toFixed(1)}%</td>
+                  <td className="p-4 font-mono">{((m.avg_perclos || 0) * 100).toFixed(1)}%</td>
                   <td className="p-4 font-mono">{m.total_blinks}</td>
                   <td className="p-4 font-mono">{m.total_yawns}</td>
                   <td className="p-4 font-mono">{m.total_microsleeps}</td>
-                  <td className="p-4 font-mono">{m.total_nods}</td>
                   <td className="p-4 font-mono">{m.max_drowsiness_score?.toFixed(1)}</td>
                   <td className="p-4">{new Date(m.created_at).toLocaleString('es-ES')}</td>
                 </tr>

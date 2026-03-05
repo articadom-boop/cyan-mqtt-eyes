@@ -3,21 +3,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-interface EmergencyAlert {
-  id: string;
-  session_id: string;
-  alert_type: string;
-  drowsiness_score: number;
-  drowsiness_level: string;
-  perclos: number;
-  ear: number;
-  alert_reasons: string[];
-  acknowledged: boolean;
-  created_at: string;
-}
-
 const Alerts = () => {
-  const [alerts, setAlerts] = useState<EmergencyAlert[]>([]);
+  const [alerts, setAlerts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchAlerts = async () => {
@@ -28,7 +15,7 @@ const Alerts = () => {
       .order('created_at', { ascending: false })
       .limit(100);
     
-    if (!error && data) setAlerts(data as EmergencyAlert[]);
+    if (!error && data) setAlerts(data);
     setLoading(false);
   };
 
@@ -59,7 +46,7 @@ const Alerts = () => {
         <p className="text-center text-muted-foreground py-8">Cargando...</p>
       ) : alerts.length === 0 ? (
         <div className="bg-card rounded-xl border border-border p-8 text-center text-muted-foreground">
-          No hay alertas registradas. Pendiente: conectar base de datos.
+          No hay alertas registradas aún.
         </div>
       ) : (
         <div className="space-y-4">
@@ -84,7 +71,7 @@ const Alerts = () => {
                 </div>
                 <div>
                   <span className="opacity-70">PERCLOS:</span>{' '}
-                  <span className="font-mono">{(a.perclos * 100)?.toFixed(1)}%</span>
+                  <span className="font-mono">{((a.perclos || 0) * 100).toFixed(1)}%</span>
                 </div>
                 <div>
                   <span className="opacity-70">EAR:</span>{' '}

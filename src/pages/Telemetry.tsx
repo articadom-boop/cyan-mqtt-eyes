@@ -3,16 +3,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { Truck, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-interface TelemetryRecord {
-  id: string;
-  session_id: string;
-  raw_payload: Record<string, unknown>;
-  topic: string;
-  received_at: string;
-}
-
 const Telemetry = () => {
-  const [records, setRecords] = useState<TelemetryRecord[]>([]);
+  const [records, setRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchTelemetry = async () => {
@@ -23,7 +15,7 @@ const Telemetry = () => {
       .order('received_at', { ascending: false })
       .limit(100);
     
-    if (!error && data) setRecords(data as TelemetryRecord[]);
+    if (!error && data) setRecords(data);
     setLoading(false);
   };
 
@@ -57,7 +49,7 @@ const Telemetry = () => {
                 <tr><td colSpan={4} className="p-8 text-center text-muted-foreground">Cargando...</td></tr>
               ) : records.length === 0 ? (
                 <tr><td colSpan={4} className="p-8 text-center text-muted-foreground">
-                  No hay telemetría registrada. Pendiente: conectar base de datos.
+                  No hay telemetría registrada aún.
                 </td></tr>
               ) : records.map(r => (
                 <tr key={r.id} className="border-b border-border hover:bg-muted/30 transition-colors">

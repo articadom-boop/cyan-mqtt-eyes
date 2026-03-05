@@ -3,17 +3,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { FileText, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-interface Session {
-  id: string;
-  vehicle_id: string;
-  driver_id: string;
-  started_at: string;
-  ended_at: string | null;
-  status: string;
-}
-
 const Sessions = () => {
-  const [sessions, setSessions] = useState<Session[]>([]);
+  const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchSessions = async () => {
@@ -24,7 +15,7 @@ const Sessions = () => {
       .order('started_at', { ascending: false })
       .limit(50);
     
-    if (!error && data) setSessions(data as Session[]);
+    if (!error && data) setSessions(data);
     setLoading(false);
   };
 
@@ -60,7 +51,7 @@ const Sessions = () => {
                 <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">Cargando...</td></tr>
               ) : sessions.length === 0 ? (
                 <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">
-                  No hay sesiones registradas. Pendiente: conectar base de datos.
+                  No hay sesiones registradas aún.
                 </td></tr>
               ) : sessions.map(s => (
                 <tr key={s.id} className="border-b border-border hover:bg-muted/30 transition-colors">

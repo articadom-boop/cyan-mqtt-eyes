@@ -3,17 +3,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { Database, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-interface EventRecord {
-  id: string;
-  session_id: string;
-  event_type: string;
-  severity: string;
-  details: Record<string, unknown>;
-  created_at: string;
-}
-
 const Events = () => {
-  const [events, setEvents] = useState<EventRecord[]>([]);
+  const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchEvents = async () => {
@@ -24,7 +15,7 @@ const Events = () => {
       .order('created_at', { ascending: false })
       .limit(100);
     
-    if (!error && data) setEvents(data as EventRecord[]);
+    if (!error && data) setEvents(data);
     setLoading(false);
   };
 
@@ -68,7 +59,7 @@ const Events = () => {
                 <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">Cargando...</td></tr>
               ) : events.length === 0 ? (
                 <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">
-                  No hay eventos registrados. Pendiente: conectar base de datos.
+                  No hay eventos registrados aún.
                 </td></tr>
               ) : events.map(e => (
                 <tr key={e.id} className="border-b border-border hover:bg-muted/30 transition-colors">
